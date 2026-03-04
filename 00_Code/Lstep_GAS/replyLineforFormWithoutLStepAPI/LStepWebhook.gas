@@ -1,0 +1,335 @@
+/**
+ * LINE Webhook用のdoPost関数
+ * LINEからのWebhookデータをスプレッドシートに記録する
+ */
+function doPost(e) {
+  try {
+    // リクエストデータをパース
+    const data = JSON.parse(e.postData.contents);
+    
+    // LINE Webhook署名検証（必要に応じて有効化）
+    // if (!verifySignature(e)) {
+    //   return ContentService.createTextOutput("Unauthorized").setMimeType(ContentService.MimeType.TEXT);
+    // }
+    
+    // スプレッドシートを取得
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    
+    // 各イベントを処理
+    data.events.forEach(event => {
+      processEvent(event, spreadsheet);
+    });
+    
+    return ContentService.createTextOutput("OK").setMimeType(ContentService.MimeType.TEXT);
+    
+  } catch (error) {
+    console.error('Error processing webhook:', error);
+    return ContentService.createTextOutput("Error").setMimeType(ContentService.MimeType.TEXT);
+  }
+}
+
+/**
+ * LINE APIからユーザー情報を取得
+ */
+function getUserProfile(userId) {
+  try {
+    const accessToken = PropertiesService.getScriptProperties().getProperty('CHANNEL_ACCESS_TOKEN');
+    if (!accessToken) {
+      console.error('CHANNEL_ACCESS_TOKEN not set');
+      return { displayName: 'Unknown', statusMessage: '', pictureUrl: '' };
+    }
+    
+    const url = `https://api.line.me/v2/bot/profile/${userId}`;
+    const options = {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    };
+    
+    const response = UrlFetchApp.fetch(url, options);
+    
+    if (response.getResponseCode() === 200) {
+      const profile = JSON.parse(response.getContentText());
+      return {
+        displayName: profile.displayName || 'Unknown',
+        statusMessage: profile.statusMessage || '',
+        pictureUrl: profile.pictureUrl || ''
+      };
+    } else {
+      console.error('Failed to get user profile:', response.getResponseCode(), response.getContentText());
+      return { displayName: 'Unknown', statusMessage: '', pictureUrl: '' };
+    }
+    
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    return { displayName: 'Unknown', statusMessage: '', pictureUrl: '' };
+  }
+}
+
+/**
+ * ユーザー名をキャッシュから取得またはAPIから取得してキャッシュに保存
+ */
+function getCachedUserName(userId) {
+  if (!userId) return 'Unknown';
+  
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `user_${userId}`;
+  
+  // キャッシュから取得を試行
+  let userName = cache.get(cacheKey);
+  
+  if (!userName) {
+    // キャッシュになければAPIから取得
+    const profile = getUserProfile(userId);
+    userName = profile.displayName;
+    
+    // 6時間キャッシュ
+    cache.put(cacheKey, userName, 21600);
+  }
+  
+  return userName;
+}
+
+/**
+ * 個別のイベントを処理してスプレッドシートに記録
+ */
+function processEvent(event, spreadsheet) {
+  const timestamp = new Date(event.timestamp);
+  const eventType = event.type;
+  
+  switch (eventType) {
+    case 'message':
+      handleMessageEvent(event, spreadsheet, timestamp);
+      break;
+    case 'follow':
+      handleFollowEvent(event, spreadsheet, timestamp);
+      break;
+    case 'unfollow':
+      handleUnfollowEvent(event, spreadsheet, timestamp);
+      break;
+    case 'join':
+      handleJoinEvent(event, spreadsheet, timestamp);
+      break;
+    case 'leave':
+      handleLeaveEvent(event, spreadsheet, timestamp);
+      break;
+    case 'memberJoined':
+      handleMemberJoinedEvent(event, spreadsheet, timestamp);
+      break;
+    case 'memberLeft':
+      handleMemberLeftEvent(event, spreadsheet, timestamp);
+      break;
+    case 'postback':
+      handlePostbackEvent(event, spreadsheet, timestamp);
+      break;
+    case 'beacon':
+      handleBeaconEvent(event, spreadsheet, timestamp);
+      break;
+    case 'accountLink':
+      handleAccountLinkEvent(event, spreadsheet, timestamp);
+      break;
+    case 'things':
+      handleThingsEvent(event, spreadsheet, timestamp);
+      break;
+    default:
+      handleUnknownEvent(event, spreadsheet, timestamp);
+  }
+}
+
+/**
+ * メッセージイベントの処理
+ */
+function handleMessageEvent(event, spreadsheet, timestamp) {
+  // メッセージタイプ別にシートを分ける
+  const messageType = event.message.type;
+  const sheetName = `Message_${messageType.charAt(0).toUpperCase() + messageType.slice(1)}`;
+  const sheet = getOrCreateSheet(spreadsheet, sheetName);
+  
+  // メッセージタイプ別のヘッダー設定
+  if (sheet.getLastRow() === 0) {
+    setMessageHeaders(sheet, messageType);
+  }
+  
+  const message = event.message;
+  const userId = event.source.userId;
+  const userName = getCachedUserName(userId);
+  
+  const baseData = [
+    timestamp,
+    userId || event.source.groupId || event.source.roomId,
+    userName,
+    message.id,
+    messageType
+  ];
+  
+  // メッセージタイプ別のデータ追加
+  const specificData = getMessageSpecificData(message, messageType);
+  const row = baseData.concat(specificData);
+  
+  sheet.appendRow(row);
+}
+
+/**
+ * メッセージタイプ別のヘッダー設定
+ */
+function setMessageHeaders(sheet, messageType) {
+  const baseHeaders = ['日時', 'ユーザーID', 'ユーザー名', 'メッセージID', 'メッセージタイプ'];
+  
+  let specificHeaders = [];
+  switch (messageType) {
+    case 'text':
+      specificHeaders = ['テキスト'];
+      break;
+    default:
+      specificHeaders = ['その他データ'];
+  }
+  
+  const headers = baseHeaders.concat(specificHeaders);
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+}
+
+/**
+ * メッセージタイプ別の固有データ取得
+ */
+function getMessageSpecificData(message, messageType) {
+  switch (messageType) {
+    case 'text':
+      return [message.text || ''];
+    default:
+      return [JSON.stringify(message)];
+  }
+}
+
+/**
+ * フォローイベントの処理
+ */
+function handleFollowEvent(event, spreadsheet, timestamp) {
+  const sheet = getOrCreateSheet(spreadsheet, 'Event_Follow');
+  
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, 5).setValues([[
+      '日時', 'ユーザーID', 'ユーザー名', 'リプライトークン', 'ソースタイプ'
+    ]]);
+  }
+
+  
+  const userId = event.source.userId;
+  const userName = getUserProfile(userId).displayName;
+
+  const row = [
+    timestamp,
+    userId,
+    userName,
+    event.replyToken,
+    event.source.type
+  ];
+  
+  sheet.appendRow(row);
+}
+
+/**
+ * アンフォローイベントの処理
+ */
+function handleUnfollowEvent(event, spreadsheet, timestamp) {
+  const sheet = getOrCreateSheet(spreadsheet, 'Event_Unfollow');
+  
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, 4).setValues([[
+      '日時', 'ユーザーID', 'ユーザー名', 'ソースタイプ'
+    ]]);
+  }
+  
+  const userId = event.source.userId;
+  const userName = getCachedUserName(userId);
+  
+  const row = [
+    timestamp,
+    userId,
+    userName,
+    event.source.type
+  ];
+  
+  sheet.appendRow(row);
+}
+
+/**
+ * ポストバックイベントの処理
+ */
+function handlePostbackEvent(event, spreadsheet, timestamp) {
+  const sheet = getOrCreateSheet(spreadsheet, 'Event_Postback');
+  
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, 8).setValues([[
+      '日時', 'ユーザーID', 'ユーザー名', 'ソースタイプ', 'ポストバックデータ', 'パラメーター', 'リプライトークン', 'モード'
+    ]]);
+  }
+  
+  const userId = event.source.userId;
+  const userName = getCachedUserName(userId);
+  const postback = event.postback;
+  
+  const row = [
+    timestamp,
+    userId,
+    userName,
+    event.source.type,
+    postback.data,
+    JSON.stringify(postback.params || {}),
+    event.replyToken,
+    event.mode || ''
+  ];
+  
+  sheet.appendRow(row);
+}
+
+/**
+ * 未知のイベントの処理
+ */
+function handleUnknownEvent(event, spreadsheet, timestamp) {
+  const sheet = getOrCreateSheet(spreadsheet, 'Event_Unknown');
+  
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, 4).setValues([[
+      '日時', 'イベントタイプ', 'ソース', 'イベント全体'
+    ]]);
+  }
+  
+  const row = [
+    timestamp,
+    event.type,
+    JSON.stringify(event.source || {}),
+    JSON.stringify(event)
+  ];
+  
+  sheet.appendRow(row);
+}
+
+/**
+ * シートを取得または作成
+ */
+function getOrCreateSheet(spreadsheet, sheetName) {
+  let sheet = spreadsheet.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(sheetName);
+  }
+  return sheet;
+}
+
+/**
+ * LINE Webhook署名検証（オプション）
+ * 使用する場合は、スクリプトプロパティにCHANNEL_SECRETを設定
+ */
+function verifySignature(e) {
+  const channelSecret = PropertiesService.getScriptProperties().getProperty('CHANNEL_SECRET');
+  if (!channelSecret) return true; // 署名検証をスキップ
+  
+  const signature = e.parameter['x-line-signature'];
+  const body = e.postData.contents;
+  
+  const hash = Utilities.computeHmacSha256Signature(body, channelSecret);
+  const expectedSignature = 'sha256=' + Utilities.base64Encode(hash);
+  
+  return signature === expectedSignature;
+}

@@ -1,0 +1,101 @@
+function fetchURLSample(){
+  const url = "https://www.homes.co.jp/fudousantensyoku/job/10729/";
+  const parseResult = fetchAndParseStructured(url);
+  Logger.log(JSON.stringify(parseResult, null, 2));
+  Logger.log(parseResult.h1);
+  Logger.log(parseResult.salary.join(" / "));
+  Logger.log(parseResult.workingHours.join(" / "));
+  
+}
+
+function fetchAndParseStructured(url) {
+  const response = UrlFetchApp.fetch(url);
+  const html = response.getContentText("UTF-8");
+  const parcseContent = parseCont1(html);
+  const parcsedResult = extractRequiredData(parcseContent);
+  return parcsedResult;
+  //Logger.log(JSON.stringify(result, null, 2));
+}
+
+function extractRequiredData(parsedData) {
+
+  if (!parsedData || !parsedData.sections) {
+    return { error: "Invalid data structure" };
+  }
+
+  // h3名で探すヘルパー
+  function findSection(title) {
+    return parsedData.sections.find(sec => 
+      sec.h3.trim() === title
+    );
+  }
+
+  const salarySection = findSection("給与");
+  const workingTimeSection = findSection("勤務時間");
+
+  return {
+    h1: parsedData.h1 || "",
+    salary: salarySection ? salarySection.paragraphs : [],
+    workingHours: workingTimeSection ? workingTimeSection.paragraphs : []
+  };
+}
+
+
+/**
+ * cont1セクションを解析して構造体にする
+ */
+function parseCont1(html) {
+
+  // ① cont1セクション抽出
+  const sectionMatch = html.match(
+    /<section[^>]*class=["'][^"']*cont1[^"']*["'][^>]*>([\s\S]*?)<\/section>/i
+  );
+
+  if (!sectionMatch) {
+    return { error: "cont1 section not found" };
+  }
+
+  const sectionHtml = sectionMatch[1];
+
+  // ② h1取得
+  const h1Match = sectionHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  const h1 = h1Match ? cleanText(h1Match[1]) : "";
+
+  // ③ h3 + p のブロックを正規表現で取得
+  const blockRegex = /<h3[^>]*>([\s\S]*?)<\/h3>([\s\S]*?)(?=<h3|$)/gi;
+
+  const sections = [];
+  let match;
+
+  while ((match = blockRegex.exec(sectionHtml)) !== null) {
+
+    const h3Text = cleanText(match[1]);
+    const blockContent = match[2];
+
+    // pタグ複数取得
+    const pMatches = [...blockContent.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)];
+    const paragraphs = pMatches.map(p => cleanText(p[1]));
+
+    sections.push({
+      h3: h3Text,
+      paragraphs: paragraphs
+    });
+  }
+
+  return {
+    h1: h1,
+    sections: sections
+  };
+}
+
+
+/**
+ * HTMLタグ除去 + 改行整形
+ */
+function cleanText(text) {
+  return text
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}

@@ -1,0 +1,206 @@
+function test() {
+  const groupId = getGroupIdByAnswers(["d", "e", "f"]);
+  Logger.log(groupId);
+  const sendJobs = processUserWithLock(208606494,groupId,1);
+  Logger.log(sendJobs);
+  Logger.log(sendJobs[0].Url);
+}
+
+/**
+ * 指定したAnswer配列に一致するGroup_IDを取得する関数
+ *
+ * 【仕様】
+ * ・シート名：Form_Group
+ * ・1行目はヘッダー
+ * ・「Answer」で始まる列は自動検出（列が増えても修正不要）
+ * ・完全一致検索
+ *
+ * @param {string[]} answers - Answer1, Answer2... の値を配列で渡す
+ * @returns {string|number|null} 該当するGroup_ID / 見つからなければnull
+ */
+function getGroupIdByAnswers(answers) {
+
+  // アクティブスプレッドシート取得
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 対象シート取得
+  const sheet = ss.getSheetByName("Form_Group");
+  
+  if (!sheet) {
+    throw new Error("Form_Group シートが存在しません");
+  }
+
+  // シートの全データ取得（2次元配列）
+  const values = sheet.getDataRange().getValues();
+
+  if (values.length < 2) {
+    return null; // データが無い場合
+  }
+
+  // ヘッダー行取得
+  const headers = values[0];
+
+  // -------------------------------
+  // ① Group_ID列のインデックス取得
+  // -------------------------------
+  const groupIdIndex = headers.indexOf("Group_ID");
+
+  if (groupIdIndex === -1) {
+    throw new Error("Group_ID列が見つかりません");
+  }
+
+  // -------------------------------
+  // ② Answer列を自動検出
+  // 「Answer」で始まる列をすべて取得
+  // -------------------------------
+  const answerIndexes = headers
+    .map((header, index) =>
+      header.toString().startsWith("Answer") ? index : -1
+    )
+    .filter(index => index !== -1);
+
+  // 渡されたAnswer数と列数チェック
+  if (answers.length !== answerIndexes.length) {
+    throw new Error(
+      `Answer数が一致しません（期待:${answerIndexes.length} / 入力:${answers.length}）`
+    );
+  }
+
+  // -------------------------------
+  // ③ データ行をループして完全一致検索
+  // -------------------------------
+  for (let row = 1; row < values.length; row++) {
+
+    // すべてのAnswer列が一致するか判定
+    const isMatch = answerIndexes.every((colIndex, i) => {
+      return values[row][colIndex] == answers[i];
+    });
+
+    // 一致したらGroup_IDを返す
+    if (isMatch) {
+      return values[row][groupIdIndex];
+    }
+  }
+
+  // 見つからなかった場合
+  return null;
+}
+
+/**
+ * ユーザーに未送信求人を指定件数だけ安全に取得し、
+ * 同時に送信履歴へ登録する（排他制御＋最適化版）
+ *
+ * @param {string|number} userId
+ * @param {string|number} groupId
+ * @param {number} limit
+ * @returns {Object[]} 送信対象求人
+ */
+function processUserWithLock(userId, groupId, limit) {
+
+  const lock = LockService.getScriptLock();
+
+  try {
+
+    // 最大10秒待機
+    lock.waitLock(10000);
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const jobSheet = ss.getSheetByName("Job_Opening");
+    const mapSheet = ss.getSheetByName("ID_MAP");
+
+    if (!jobSheet || !mapSheet) {
+      throw new Error("必要なシートが存在しません");
+    }
+
+    // -----------------------------
+    // ① Job_Opening取得
+    // -----------------------------
+    const jobValues = jobSheet.getDataRange().getValues();
+    if (jobValues.length < 2) return [];
+
+    const jobHeaders = jobValues[0];
+
+    const jobIdIndex = jobHeaders.indexOf("ID");
+    const jobGroupIndex = jobHeaders.indexOf("Group_ID");
+    const validIndex = jobHeaders.indexOf("Vaild");
+    const urlIndex = jobHeaders.indexOf("Url");
+    const jobIndex = jobHeaders.indexOf("Job_Name");
+    const salaryIndex = jobHeaders.indexOf("Salary");
+    const workingIndex = jobHeaders.indexOf("Working_Style");
+
+    // -----------------------------
+    // ② ID_MAP取得（必要列のみ）
+    // -----------------------------
+    const lastMapRow = mapSheet.getLastRow();
+    let mapValues = [];
+
+    if (lastMapRow > 1) {
+      mapValues = mapSheet
+        .getRange(1, 1, lastMapRow, 2)
+        .getValues();
+    }
+
+    const sentSet = new Set();
+
+    for (let i = 1; i < mapValues.length; i++) {
+      if (mapValues[i][0] == userId) {
+        sentSet.add(mapValues[i][1]);
+      }
+    }
+
+    // -----------------------------
+    // ③ 未送信求人抽出
+    // -----------------------------
+    const selectedJobs = [];
+
+    for (let i = 1; i < jobValues.length; i++) {
+
+      const row = jobValues[i];
+
+      const isValid =
+        String(row[validIndex]).toUpperCase() === "TRUE";
+
+      if (
+        row[jobGroupIndex] == groupId &&
+        isValid &&
+        !sentSet.has(row[jobIdIndex])
+      ) {
+
+        selectedJobs.push({
+          ID: row[jobIdIndex],
+          Job:row[jobIndex],
+          Salary: row[salaryIndex],
+          Working_Style: row[workingIndex],
+          Url: row[urlIndex],
+        });
+
+        if (selectedJobs.length >= limit) break;
+      }
+    }
+
+    // -----------------------------
+    // ④ 履歴登録
+    // -----------------------------
+    if (selectedJobs.length > 0) {
+
+      const rowsToInsert = selectedJobs.map(job => [userId, job.ID]);
+
+      mapSheet.getRange(
+        mapSheet.getLastRow() + 1,
+        1,
+        rowsToInsert.length,
+        2
+      ).setValues(rowsToInsert);
+    }
+
+    return selectedJobs;
+
+  } catch (e) {
+
+    throw new Error("ロック取得失敗または処理エラー: " + e.message);
+
+  } finally {
+
+    lock.releaseLock();
+  }
+}

@@ -1,0 +1,68 @@
+/**
+ * メニュー追加（既存onOpenに追記）
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("求人管理")
+    .addItem("求人を登録", "openJobModal")
+    .addItem("有効/無効を一括設定", "openJobManageModal")
+    .addToUi();
+}
+
+/**
+ * 管理モーダル表示
+ */
+function openJobManageModal() {
+  const html = HtmlService
+    .createHtmlOutputFromFile("JobManageModal")
+    .setWidth(900)
+    .setHeight(600);
+
+  SpreadsheetApp.getUi().showModalDialog(html, "求人管理");
+}
+
+/**
+ * 一覧取得
+ */
+function getJobList() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet()
+    .getSheetByName("Job_Opening");
+
+  const values = sheet.getDataRange().getValues();
+  values.shift(); // ヘッダ除外
+
+  return values.map(row => ({
+    id: row[0],
+    valid: row[1],
+    groupId: row[2],
+    url: row[3],
+    job: row[4],
+    salary: row[5],
+    workingStyle: row[6]
+  }));
+}
+
+/**
+ * 一括更新
+ */
+function updateJobValidBulk(updateList) {
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet()
+    .getSheetByName("Job_Opening");
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    updateList.forEach(item => {
+      const rowIndex = Number(item.id) + 1; // ID=行番号前提
+      const cell = sheet.getRange(rowIndex, 2);
+      cell.insertCheckboxes();
+      cell.setValue(item.valid);
+    });
+  } finally {
+    lock.releaseLock();
+  }
+
+  return true;
+}

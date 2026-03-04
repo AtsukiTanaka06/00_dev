@@ -1,0 +1,67 @@
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("求人管理")
+    .addItem("求人を登録", "openJobModal")
+    .addToUi();
+}
+
+function openJobModal() {
+  const html = HtmlService
+    .createHtmlOutputFromFile("JobModal")
+    .setWidth(450)
+    .setHeight(550);
+
+  SpreadsheetApp.getUi().showModalDialog(html, "求人登録");
+}
+
+/**
+ * 求人登録処理
+ */
+function insertJobData(groupId, url, isValid) {
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet()
+    .getSheetByName("Job_Opening");
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+
+    const lastRow = sheet.getLastRow();
+    const newId = lastRow; // 1行目ヘッダ想定
+
+    // サンプル値
+    //const url = "https://www.homes.co.jp/fudousantensyoku/job/10729/";
+    const parseResult = fetchAndParseStructured(url);
+    const jobName = parseResult.h1;
+    const salary = parseResult.salary.join(" / ");
+    const workingStyle = parseResult.workingHours.join(" / ");
+
+    // 追加
+    sheet.appendRow([
+      newId,
+      isValid,               // ← チェックボックス用
+      Number(groupId),
+      url,
+      jobName,
+      salary,
+      workingStyle
+    ]);
+
+    // Vaild列をチェックボックス化（2列目）
+    const targetCell = sheet.getRange(sheet.getLastRow(), 2);
+    targetCell.insertCheckboxes();
+    targetCell.setValue(isValid);
+
+    return {
+      id: newId,
+      job: jobName,
+      salary: salary,
+      workingStyle: workingStyle,
+      valid: isValid
+    };
+
+  } finally {
+    lock.releaseLock();
+  }
+}

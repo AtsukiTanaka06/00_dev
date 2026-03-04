@@ -1,0 +1,275 @@
+const FORM_SHEET_NAME = "シート1";
+const JOB_NUM = 2; //一回で送付する求人数
+
+function onSheetChange(e) {
+  try {
+    
+    const sheet = e.source.getActiveSheet();
+
+    // 対象シート以外は何もしない
+    if (sheet.getName() !== FORM_SHEET_NAME) {
+      return;
+    }
+    
+    writeLog("INFO", "onSheetChange", "START", "処理開始", e?.changeType);
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const formSheet = ss.getSheetByName(FORM_SHEET_NAME);
+
+    if (!formSheet) {
+      writeLog("ERROR", "onSheetChange", "SHEET_CHECK", "フォームシートが見つかりません");
+      return;
+    }
+
+    const lastRow = formSheet.getLastRow();
+    if (lastRow < 2) {
+      writeLog("WARN", "onSheetChange", "ROW_CHECK", "データ行が存在しません");
+      return;
+    }
+
+    const lastCol = formSheet.getLastColumn();
+    const headers = formSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const values = formSheet.getRange(lastRow, 1, 1, lastCol).getValues()[0];
+
+    const data = {};
+    headers.forEach((h, i) => data[h] = values[i]);
+
+    writeLog("INFO", "onSheetChange", "DATA_LOADED", "フォームデータ取得", data);
+
+    // ===== LStepID =====
+    const lstepId = data["回答者ID"];
+    if (!lstepId) {
+      writeLog("ERROR", "onSheetChange", "LSTEP_ID", "回答者IDが空", data);
+      writeFormAnswerLog("送信失敗",data["回答ID"],data["回答日時"],data["回答者ID"],data["回答者名"])
+      return;
+    }
+                                                                                  
+    // ==== 回答Form結果から求人の引き当て ====
+    const groupId = getGroupIdByAnswers(["a", "b", "c"]);
+    const sendJobs = processUserWithLock(data["回答者ID"],groupId,JOB_NUM);
+  
+    const demo_message = sendJobs[0].ID + "\r\n" + "■求人名：" + sendJobs[0].Job + "\r\n" + "■給与：" + sendJobs[0].Salary + "\r\n" + "■勤務形態：" + sendJobs[0].Working_Style + "\r\n" + "詳しくはこちら↓" + "\r\n" + sendJobs[0].Url; 
+    
+    // ===== LINE送信 =====
+    //sendLstepAPI(lstepId,gptResponse);
+    sendLstepAPI(lstepId,demo_message);
+    writeLog("INFO", "onSheetChange", "LINE_SEND", "LINE送信成功", { lstepId });
+    writeFormAnswerLog("送信成功",data["回答ID"],data["回答日時"],data["回答者ID"],data["回答者名"]);
+
+  } catch (err) {
+    writeLog(
+      "ERROR",
+      "onSheetChange",
+      "EXCEPTION",
+      err.message,
+      { stack: err.stack }
+    );
+    writeFormAnswerLog("送信失敗",data["回答ID"],data["回答日時"],data["回答者ID"],data["回答者名"]);
+  }
+}
+
+//LStep APIの呼び出し(LStepのfriend_idで指定)
+function sendLstepAPI(friend_id, message) {
+  const url = "https://api.lineml.jp/v1/api-codes/676/triggers/3a842350-1e2c-4864-85f4-83697d5a5e22";
+  
+  const token = PropertiesService.getScriptProperties().getProperty('LSTEP_API_TOKEN'); //プロパティ管理
+
+  const payload = {
+    friend_id: friend_id,
+    params: {
+      sned_message: message
+    }
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true  // エラー内容確認用
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+
+  Logger.log("Status: " + response.getResponseCode());
+  Logger.log("Body: " + response.getContentText());
+}
+
+
+
+/**
+ * 指定シートの最終行に値を追加する
+ * @param {string} sheetName - シート名
+ * @param {string} userId - ユーザーID
+ * @param {string} lineDisplayName - LINE表示名
+ */
+function addUserToSheet(sheetName, userId, lineDisplayName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    throw new Error(`シートが見つかりません: ${sheetName}`);
+  }
+
+  // 最終行の次の行番号
+  const nextRow = sheet.getLastRow() + 1;
+
+  // A列: ユーザーID, B列: LINE表示名
+  sheet.getRange(nextRow, 1, 1, 2).setValues([
+    [userId, lineDisplayName]
+  ]);
+}
+
+/**
+ * Line グループへの通知用
+ * LINE名が重複した際にLINEグループへ通知し、手動で対応を促す
+ */
+function notifyLineError(level, answerID, answer, lineUserName, detail = "") {
+  if (level !== "ERROR") return;
+
+  const groupId = getSettingValue("LINE_ERROR_GROUP_ID");
+  if (!groupId) {
+    Logger.log("LINE_ERROR_GROUP_ID が Setting に存在しません");
+    return;
+  }
+
+  const text =
+`🚨【GASエラー通知】
+
+■ 発生時刻
+${Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss")}
+
+■ 回答ID
+${answerID}
+
+■ 回答内容
+${answer}
+
+■ 回答者（LINE名）
+${lineUserName}
+
+■ 内容
+ライン名が重複しているため、回答者の特定ができませんでした。\r\n
+手動にて回答をしてください。
+
+■ 詳細
+${typeof detail === "object" ? JSON.stringify(detail, null, 2) : detail}
+`;
+
+  sendLineMessage(groupId, text);
+}
+
+function getSettingValue(key) {
+  const sheet = SpreadsheetApp
+    .getActiveSpreadsheet()
+    .getSheetByName("Setting");
+
+  if (!sheet) {
+    throw new Error("Setting シートが見つかりません");
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 1) return null;
+
+  const values = sheet.getRange(1, 1, lastRow, 2).getValues();
+
+  for (const row of values) {
+    if (row[0] === key) {
+      return row[1];
+    }
+  }
+  return null;
+}
+
+
+/**
+ * Logger シートに回答への返信の成功/失敗のステータスを書き込む
+ */
+
+const LOG_SHEET = "Log";
+
+function writeFormAnswerLog(status,answerId,answerDate,lstepId,answerName) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(LOG_SHEET);
+    if (!sheet) return;
+
+    const nowJST = Utilities.formatDate(
+      new Date(),
+      "Asia/Tokyo",
+      "yyyy/MM/dd HH:mm:ss"
+    );
+
+    sheet.appendRow([
+      nowJST,
+      status,
+      answerId,
+      answerDate,
+      lstepId,
+      answerName,
+    ]);
+  } catch (e) {
+    // ログ失敗時は Logger.log のみ
+    Logger.log("LOG ERROR: " + e);
+  }
+}
+
+const LOGGER_SHEET = "Logger";
+
+/**
+ * Logger シートにログを書き込む
+ */
+function writeLog(level, funcName, step, message, detail = "") {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(LOGGER_SHEET);
+    if (!sheet) return;
+
+    const nowJST = Utilities.formatDate(
+      new Date(),
+      "Asia/Tokyo",
+      "yyyy/MM/dd HH:mm:ss"
+    );
+
+    sheet.appendRow([
+      nowJST,
+      level,
+      funcName,
+      step,
+      message,
+      typeof detail === "object" ? JSON.stringify(detail) : detail
+    ]);
+  } catch (e) {
+    // ログ失敗時は Logger.log のみ
+    Logger.log("LOGGING ERROR: " + e);
+  }
+}
+
+/**
+ * ログ肥大化防止のため、時間主導トリガーで定期実行の設定が必要
+ */
+function deleteOldLogs() {
+  const SHEET_NAME = 'Logger';
+  const KEEP_DAYS = 7;
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (!sheet) return;
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return; // ヘッダーのみ
+
+  const now = new Date();
+  const limitDate = new Date(now.getTime() - KEEP_DAYS * 24 * 60 * 60 * 1000);
+
+  const values = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+
+  // 削除対象行を後ろから削除（重要）
+  for (let i = values.length - 1; i >= 0; i--) {
+    const logDate = values[i][0];
+    if (logDate instanceof Date && logDate < limitDate) {
+      sheet.deleteRow(i + 2);
+    }
+  }
+}

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: 'Segoe UI';
+      margin: 20px;
+    }
+
+    input[type="text"] {
+      padding: 8px;
+      width: 300px;
+      margin-bottom: 10px;
+    }
+
+    button {
+      padding: 8px 14px;
+      margin-left: 5px;
+      cursor: pointer;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      font-size: 13px;
+    }
+
+    th {
+      background: #667eea;
+      color: white;
+    }
+
+    .save-btn {
+      margin-top: 15px;
+      background: #2ecc71;
+      color: white;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+
+<h2>求人 有効/無効 管理</h2>
+
+<input type="text" id="searchBox" placeholder="Group_ID, URL または Job名 で検索">
+<button onclick="filterTable()">検索</button>
+
+<div id="tableArea"></div>
+
+<button class="save-btn" onclick="saveChanges()">一括保存</button>
+
+<script>
+
+let jobData = [];
+
+window.onload = function() {
+  google.script.run
+    .withSuccessHandler(function(data){
+      jobData = data;
+      renderTable(jobData);
+    })
+    .getJobList();
+};
+
+function renderTable(data) {
+
+  let html = `
+    <table>
+      <tr>
+        <th>ID</th>
+        <th>Vaild</th>
+        <th>Group_ID</th>
+        <th>URL</th>
+        <th>Job</th>
+        <th>Salary</th>
+        <th>Working Style</th>
+      </tr>
+  `;
+
+  data.forEach(row => {
+    html += `
+      <tr>
+        <td>${row.id}</td>
+        <td><input type="checkbox" data-id="${row.id}" ${row.valid ? "checked" : ""}></td>
+        <td>${row.groupId}</td>
+        <td>${row.url}</td>
+        <td>${row.job}</td>
+        <td>${row.salary}</td>
+        <td>${row.workingStyle}</td>
+      </tr>
+    `;
+  });
+
+  html += `</table>`;
+
+  document.getElementById("tableArea").innerHTML = html;
+}
+
+function filterTable() {
+
+  const keyword = document.getElementById("searchBox").value.toLowerCase();
+
+  const filtered = jobData.filter(row =>
+    String(row.groupId).includes(keyword) ||
+    row.url.toLowerCase().includes(keyword) ||
+    row.job.toLowerCase().includes(keyword)
+  );
+
+  renderTable(filtered);
+}
+
+function saveChanges() {
+
+  const checkboxes = document.querySelectorAll("input[type='checkbox']");
+
+  const updateList = [];
+
+  checkboxes.forEach(cb => {
+    updateList.push({
+      id: cb.dataset.id,
+      valid: cb.checked
+    });
+  });
+
+  google.script.run
+    .withSuccessHandler(function(){
+      alert("更新完了しました！");
+      google.script.host.close();
+    })
+    .updateJobValidBulk(updateList);
+}
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+    .card {
+      background: white;
+      padding: 30px;
+      width: 380px;
+      border-radius: 16px;
+      box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+    }
+
+    h2 {
+      text-align: center;
+    }
+
+    .form-group {
+      margin-bottom: 18px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 6px;
+      color: #555;
+    }
+
+    input[type="number"],
+    input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+      transition: 0.2s;
+    }
+
+    input:focus {
+      border-color: #667eea;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(102,126,234,0.2);
+    }
+
+    .checkbox-group {
+      margin-bottom: 15px;
+      font-size: 14px;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s;
+      margin-top: 10px;
+    }
+
+    .btn-primary {
+      background: #667eea;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #5563c1;
+    }
+
+    .btn-success {
+      background: #2ecc71;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #27ae60;
+    }
+
+    .confirm-box {
+      background: #f4f6ff;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-top: 15px;
+      display: none;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px);}
+      to { opacity: 1; transform: translateY(0);}
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h2>求人登録</h2>
+
+    <div class="form-group">
+      <label>Group_ID</label>
+      <input type="number" id="groupId" placeholder="例: 1">
+    </div>
+
+    <div class="form-group">
+      <label>URL</label>
+      <input type="text" id="url" placeholder="https://example.com">
+    </div>
+
+    <div class="checkbox-group">
+      <label>
+        <input type="checkbox" id="validCheckbox" checked>
+        有効にする
+      </label>
+    </div>
+
+    <button class="btn btn-primary" onclick="confirmData()">
+      登録内容を確認
+    </button>
+
+    <div id="confirmArea" class="confirm-box"></div>
+
+    <button id="submitBtn"
+            class="btn btn-success"
+            style="display:none;"
+            onclick="submitData()">
+      登録する
+    </button>
+  </div>
+
+<script>
+  function confirmData() {
+
+    const groupId = document.getElementById("groupId").value;
+    const url = document.getElementById("url").value;
+    const isValid = document.getElementById("validCheckbox").checked;
+
+    if (!groupId || !url) {
+      alert("すべて入力してください");
+      return;
+    }
+
+    const confirmArea = document.getElementById("confirmArea");
+
+    confirmArea.innerHTML = `
+      <strong>以下の内容で登録します：</strong><br><br>
+      Group_ID： <b>${groupId}</b><br>
+      URL： <b>${url}</b><br>
+      Vaild： <b>${isValid ? "有効" : "無効"}</b><br>
+      Job： <b>（サーバー側で自動生成）</b><br>
+      Salary： <b>（サーバー側で自動生成）</b><br>
+      Working_Style： <b>（サーバー側で自動生成）</b>
+    `;
+
+    confirmArea.style.display = "block";
+    document.getElementById("submitBtn").style.display = "block";
+  }
+
+
+  function submitData() {
+
+    const groupId = document.getElementById("groupId").value;
+    const url = document.getElementById("url").value;
+    const isValid = document.getElementById("validCheckbox").checked;
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+
+        alert(
+          "登録完了！\n\n" +
+          "ID: " + result.id + "\n" +
+          "Vaild: " + (result.valid ? "有効" : "無効") + "\n" +
+          "Job: " + result.job + "\n" +
+          "Salary: " + result.salary + "\n" +
+          "Working Style: " + result.workingStyle
+        );
+
+        google.script.host.close();
+      })
+      .withFailureHandler(function(error){
+        alert("エラー: " + error.message);
+      })
+      .insertJobData(groupId, url, isValid);
+  }
+</script>
+
+</body>
+</html>
