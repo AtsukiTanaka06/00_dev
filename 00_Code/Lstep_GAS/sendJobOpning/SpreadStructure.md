@@ -11,14 +11,15 @@
 
 # 2. シート構成一覧
 
-| Sheet Name  | Role                       |
-| ----------- | -------------------------- |
-| ID_MAP      | ユーザーと求人の紐付け管理 |
-| Job_Opening | 求人情報マスタ             |
-| Form_Group  | 回答テンプレート定義       |
-| シート1     | フォーム回答データ         |
-| Log         | 業務処理ログ               |
-| Logger      | システム内部ログ           |
+| Sheet Name    | Role                       |
+| ------------- | -------------------------- |
+| ID_MAP        | ユーザーと求人の紐付け管理 |
+| Job_Opening   | 求人情報マスタ             |
+| From_Group    | 回答テンプレート定義       |
+| シート1       | フォーム回答データ         |
+| Log           | 業務処理ログ               |
+| Answer_ID_Log | 回答ID単位の処理ログ       |
+| Logger        | システム内部ログ           |
 
 ---
 
@@ -42,7 +43,7 @@
 ### Constraints
 
 - Send_Letter_ID は Job_Opening.ID に存在する値のみ許可
-- USER_ID + Send_Letter_ID は重複不可（推奨）
+- USER_ID + Send_Letter_ID の組み合わせは重複不可（推奨）
 
 ---
 
@@ -58,7 +59,7 @@
 | ------------- | ------- | -------- | -------------- | ------------------- |
 | ID            | string  | Yes      | 求人ID（PK）   | -                   |
 | Vaild         | boolean | Yes      | 有効フラグ     | -                   |
-| Group_ID      | string  | Yes      | 回答グループID | Form_Group.Group_ID |
+| Group_ID      | string  | Yes      | 回答グループID | From_Group.Group_ID |
 | Url           | string  | Yes      | 求人URL        | -                   |
 | Job_Name      | string  | Yes      | 求人名         | -                   |
 | Salary        | string  | No       | 給与情報       | -                   |
@@ -67,11 +68,11 @@
 ### Constraints
 
 - ID は一意
-- Vaild = FALSE の場合は外部処理対象外
+- Vaild = FALSE の場合は処理対象外
 
 ---
 
-## 3.3 Form_Group
+## 3.3 From_Group
 
 ### Purpose
 
@@ -136,7 +137,31 @@
 
 ---
 
-## 3.6 Logger
+## 3.6 Answer_ID_Log
+
+### Purpose
+
+回答ID単位での処理履歴を管理するログ
+
+### Columns
+
+| Column Name | Type     | Required | Description    |
+| ----------- | -------- | -------- | -------------- |
+| Timestamp   | datetime | Yes      | 処理時刻       |
+| Status      | string   | Yes      | 処理ステータス |
+| 回答ID      | string   | Yes      | 回答ID         |
+| 回答日時    | datetime | Yes      | 回答日時       |
+| 回答者ID    | string   | Yes      | 回答者ID       |
+| 回答者名    | string   | Yes      | 回答者名       |
+
+### Notes
+
+- 回答IDごとの処理履歴を保存
+- 重複処理防止のチェックに利用可能
+
+---
+
+## 3.7 Logger
 
 ### Purpose
 
@@ -157,11 +182,15 @@
 
 # 4. リレーション
 
+```
 ID_MAP.Send_Letter_ID
-→ Job_Opening.ID
-
+        ↓
+Job_Opening.ID
+        ↓
 Job_Opening.Group_ID
-→ Form_Group.Group_ID
+        ↓
+From_Group.Group_ID
+```
 
 ---
 
@@ -169,71 +198,81 @@ Job_Opening.Group_ID
 
 1. フォーム回答登録
 2. 回答データ保存（シート1）
-3. Job_Opening 参照
-4. Form_Group 参照
-5. 業務処理実行
-6. Log 出力
-7. Logger 出力
+3. 回答IDの重複チェック（Answer_ID_Log）
+4. Job_Opening 参照
+5. From_Group 参照
+6. 業務処理実行
+7. Log 出力
+8. Answer_ID_Log 出力
+9. Logger 出力
 
 ---
 
 # 6. コード仕様書作成時に追記すべき項目
 
-## 6.1 主キー・一意制約の明文化
+## 6.1 主キー定義
 
-- 各シートのPK定義
-- 重複時の挙動
-
-## 6.2 トランザクション方針
-
-- 途中失敗時のロールバック方法
-- 書き込み順序
-
-## 6.3 バリデーション仕様
-
-- Nullチェック
-- 参照整合性チェック
-- 型チェック
-
-## 6.4 GAS関数設計
-
-例:
-
-- getJobById(id)
-- getGroupById(groupId)
-- saveAnswer(data)
-- writeLog(status, data)
-- writeSystemLog(level, context)
-
-## 6.5 エラーハンドリング仕様
-
-- try-catch範囲
-- Logger出力ルール
-- 再実行可否
-
-## 6.6 同時実行対策
-
-- LockService使用有無
-- 重複実行防止キー
-
-## 6.7 パフォーマンス方針
-
-- 全件取得回避
-- キャッシュ利用有無
-- 検索方法（Map化など）
-
-## 6.8 命名規則
-
-- シート名は固定文字列管理
-- 定数化方針
-- カラム名ハードコード禁止
+| Table       | Primary Key |
+| ----------- | ----------- |
+| Job_Opening | ID          |
+| From_Group  | Group_ID    |
+| シート1     | 回答ID      |
 
 ---
 
-# 7. 今後拡張検討項目
+## 6.2 外部キー定義
+
+| Table       | Column         | Reference           |
+| ----------- | -------------- | ------------------- |
+| ID_MAP      | Send_Letter_ID | Job_Opening.ID      |
+| Job_Opening | Group_ID       | From_Group.Group_ID |
+
+---
+
+## 6.3 GAS関数設計（例）
+
+取得系
+
+- getUserJobs(userId)
+- getJobById(id)
+- getGroupById(groupId)
+- getAnswerById(answerId)
+
+更新系
+
+- saveAnswer(data)
+- writeLog(status,data)
+- writeAnswerLog(data)
+- writeSystemLog(level,context)
+
+---
+
+## 6.4 エラーハンドリング仕様
+
+- try-catch を各処理単位で実装
+- Logger シートへエラー出力
+- 処理ステップを Step カラムに記録
+
+---
+
+## 6.5 同時実行対策
+
+- LockService 使用検討
+- Answer_ID_Log による重複処理防止
+
+---
+
+## 6.6 パフォーマンス方針
+
+- getValues() の回数最小化
+- Map構造で検索高速化
+- シートアクセス回数削減
+
+---
+
+# 7. 将来拡張案
 
 - ステータス管理カラム追加
-- 論理削除フラグ
-- 更新日時カラム
-- API化設計
-- DB移行想定設計
+- updated_at カラム
+- API化
+- RDB移行対応

@@ -1,18 +1,45 @@
 const FORM_SHEET_NAME = "シート1";
 const JOB_NUM = 2; //一回で送付する求人数
+/*************************************************
+ フォームヘッダー定義
+ 共通部
+*************************************************/
+const FORM_HEADER_COMMON = { 
+  answerId:"回答ID",
+  date:"回答日時",
+  lstepUserId:"回答者ID",
+  name:"回答者名",
+};
+
+/*************************************************
+ フォームヘッダー定義
+ 顧客ごとに変更可能
+*************************************************/
+const FORM_HEADER = {
+  jobType:"希望する職種", 
+  area:"希望する勤務エリア",
+  age:"年代を教えてください。",
+  skill:"宅建を持っていますか？",
+  selfPR:"自己PRを教えてください（任意）",
+  other:"その他の回答"};
+
+function sample_returnLINE(){
+}
 
 function onSheetChange(e) {
+
+  let normalizedFormData = null; // ← 追加
+
   try {
-    
+    /*
     const sheet = e.source.getActiveSheet();
 
-    // 対象シート以外は何もしない
     if (sheet.getName() !== FORM_SHEET_NAME) {
       return;
     }
-    
-    writeLog("INFO", "onSheetChange", "START", "処理開始", e?.changeType);
 
+    writeLog("INFO", "onSheetChange", "START", "処理開始", e?.changeType);
+*/
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const formSheet = ss.getSheetByName(FORM_SHEET_NAME);
 
@@ -31,32 +58,59 @@ function onSheetChange(e) {
     const headers = formSheet.getRange(1, 1, 1, lastCol).getValues()[0];
     const values = formSheet.getRange(lastRow, 1, 1, lastCol).getValues()[0];
 
-    const data = {};
-    headers.forEach((h, i) => data[h] = values[i]);
+    // ===== Form回答結果取得 =====
+    const rawFormData = {};
+    headers.forEach((h, i) => rawFormData[h] = values[i]);
 
-    writeLog("INFO", "onSheetChange", "DATA_LOADED", "フォームデータ取得", data);
+    // ===== 取得データの整形 =====
+    normalizedFormData = normalizeFormAnswer(rawFormData);
 
-    // ===== LStepID =====
-    const lstepId = data["回答者ID"];
-    if (!lstepId) {
-      writeLog("ERROR", "onSheetChange", "LSTEP_ID", "回答者IDが空", data);
-      writeFormAnswerLog("送信失敗",data["回答ID"],data["回答日時"],data["回答者ID"],data["回答者名"])
+    const lstepUserId = normalizedFormData["lstepUserId"];
+
+    if (!lstepUserId) {
+      writeLog("ERROR", "onSheetChange", "LSTEP_ID", "回答者IDが空");
+      writeFormAnswerLog(
+        "送信失敗",
+        normalizedFormData.answerId,
+        normalizedFormData.date,
+        normalizedFormData.lstepUserId,
+        normalizedFormData.name
+      );
       return;
     }
-                                                                                  
-    // ==== 回答Form結果から求人の引き当て ====
-    const groupId = getGroupIdByAnswers(["a", "b", "c"]);
-    const sendJobs = processUserWithLock(data["回答者ID"],groupId,JOB_NUM);
-  
-    const demo_message = sendJobs[0].ID + "\r\n" + "■求人名：" + sendJobs[0].Job + "\r\n" + "■給与：" + sendJobs[0].Salary + "\r\n" + "■勤務形態：" + sendJobs[0].Working_Style + "\r\n" + "詳しくはこちら↓" + "\r\n" + sendJobs[0].Url; 
-    
-    // ===== LINE送信 =====
-    //sendLstepAPI(lstepId,gptResponse);
-    sendLstepAPI(lstepId,demo_message);
-    writeLog("INFO", "onSheetChange", "LINE_SEND", "LINE送信成功", { lstepId });
-    writeFormAnswerLog("送信成功",data["回答ID"],data["回答日時"],data["回答者ID"],data["回答者名"]);
+
+    //重複して返信しないために、回答済みの回答IDをチェックし、Trueであれば処理しない
+    if(isAnswerIdExists(normalizedFormData.answerId)) return;
+
+    const groupIds = getGroupIdsByAnswers(rawFormData);
+
+    const sendJobs = getJobsForUser(
+      normalizedFormData.lstepUserId,
+      groupIds,
+      JOB_NUM
+    );
+
+    sendJobMessages(lstepUserId, sendJobs);
+
+    writeLog("INFO", "onSheetChange", "LINE_SEND", "LINE送信成功", { lstepUserId });
+
+    writeFormAnswerLog(
+      "送信成功",
+      normalizedFormData.answerId,
+      normalizedFormData.date,
+      normalizedFormData.lstepUserId,
+      normalizedFormData.name
+    );
+    writeAnsweIdLog(
+      "送信成功",
+      normalizedFormData.answerId,
+      normalizedFormData.date,
+      normalizedFormData.lstepUserId,
+      normalizedFormData.name
+    );
 
   } catch (err) {
+
     writeLog(
       "ERROR",
       "onSheetChange",
@@ -64,7 +118,25 @@ function onSheetChange(e) {
       err.message,
       { stack: err.stack }
     );
-    writeFormAnswerLog("送信失敗",data["回答ID"],data["回答日時"],data["回答者ID"],data["回答者名"]);
+
+    // normalizedFormDataがある場合のみログ
+    if (normalizedFormData) {
+      writeFormAnswerLog(
+        "送信失敗",
+        normalizedFormData.answerId,
+        normalizedFormData.date,
+        normalizedFormData.lstepUserId,
+        normalizedFormData.name
+      );
+      writeAnsweIdLog(
+      "送信失敗",
+      normalizedFormData.answerId,
+      normalizedFormData.date,
+      normalizedFormData.lstepUserId,
+      normalizedFormData.name
+    );
+    }
+
   }
 }
 
@@ -77,7 +149,7 @@ function sendLstepAPI(friend_id, message) {
   const payload = {
     friend_id: friend_id,
     params: {
-      sned_message: message
+      send_message: message
     }
   };
 
@@ -95,31 +167,6 @@ function sendLstepAPI(friend_id, message) {
 
   Logger.log("Status: " + response.getResponseCode());
   Logger.log("Body: " + response.getContentText());
-}
-
-
-
-/**
- * 指定シートの最終行に値を追加する
- * @param {string} sheetName - シート名
- * @param {string} userId - ユーザーID
- * @param {string} lineDisplayName - LINE表示名
- */
-function addUserToSheet(sheetName, userId, lineDisplayName) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
-
-  if (!sheet) {
-    throw new Error(`シートが見つかりません: ${sheetName}`);
-  }
-
-  // 最終行の次の行番号
-  const nextRow = sheet.getLastRow() + 1;
-
-  // A列: ユーザーID, B列: LINE表示名
-  sheet.getRange(nextRow, 1, 1, 2).setValues([
-    [userId, lineDisplayName]
-  ]);
 }
 
 /**
@@ -161,6 +208,28 @@ ${typeof detail === "object" ? JSON.stringify(detail, null, 2) : detail}
   sendLineMessage(groupId, text);
 }
 
+/*************************************************
+ ユーティリティ
+*************************************************/
+/*************************************************
+ フォーム回答正規化
+*************************************************/
+function normalizeFormAnswer(raw){
+
+  const result = {};
+
+  Object.keys(FORM_HEADER_COMMON).forEach(key=>{
+    result[key] = raw[FORM_HEADER_COMMON[key]];
+  });
+
+  Object.keys(FORM_HEADER).forEach(key=>{
+    result[key] = raw[FORM_HEADER[key]];
+  });
+
+  return result;
+
+}
+
 function getSettingValue(key) {
   const sheet = SpreadsheetApp
     .getActiveSpreadsheet()
@@ -181,6 +250,107 @@ function getSettingValue(key) {
     }
   }
   return null;
+}
+
+/*************************************************
+ 求人データ → LINEメッセージ
+*************************************************/
+function createJobMessage(job){
+
+  return (
+    job.ID + "\r\n" +
+    "■求人名：" + job.Job + "\r\n" +
+    "■給与：" + job.Salary + "\r\n" +
+    "■勤務形態：" + job.Working_Style + "\r\n" +
+    "詳しくはこちら↓" + "\r\n" +
+    job.Url
+  );
+
+}
+
+/*************************************************
+ 求人配列をLINE送信
+*************************************************/
+function sendJobMessages(lstepUserId, jobs){
+
+  if(!jobs || jobs.length === 0){
+    sendLstepAPI(lstepUserId, "紹介できる求人がありません。");
+    return;
+  }
+
+  jobs.forEach(job => {
+
+    const message = createJobMessage(job);
+
+    sendLstepAPI(lstepUserId, message);
+
+    // LINE APIのレート対策（任意）
+    Utilities.sleep(300);
+
+  });
+
+}
+
+
+/*************************************************
+ Answer_IDが既にログに存在するか判定
+ true  : 既に登録済み
+ false : 未登録
+*************************************************/
+function isAnswerIdExists(answerId){
+
+  if(!answerId) return false;
+
+  const sheet = SpreadsheetApp
+    .getActiveSpreadsheet()
+    .getSheetByName("Answer_ID_Log");
+
+  if(!sheet) throw new Error("Answer_ID_Logシートが存在しません");
+
+  const lastRow = sheet.getLastRow();
+
+  if(lastRow < 2) return false; // データなし
+
+  // Answer_ID列 (3列目)
+  const values = sheet
+    .getRange(2,3,lastRow-1,1)
+    .getValues()
+    .flat();
+
+  const answerSet = new Set(values);
+
+  return answerSet.has(answerId);
+
+}
+
+/**
+ * ANSWER_ID シートにログを書き込む
+ */
+const ANSWER_ID_LOGGER_SHEET = "Answer_ID_Log";
+function writeAnsweIdLog(status,answerId,answerDate,lstepId,answerName) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(ANSWER_ID_LOGGER_SHEET);
+    if (!sheet) return;
+
+    const nowJST = Utilities.formatDate(
+      new Date(),
+      "Asia/Tokyo",
+      "yyyy/MM/dd HH:mm:ss"
+    );
+
+    sheet.appendRow([
+      nowJST,
+      status,
+      answerId,
+      answerDate,
+      lstepId,
+      answerName,
+    ]);
+  } catch (e) {
+    // ログ失敗時は Logger.log のみ
+    Logger.log("LOG ERROR: " + e);
+  }
 }
 
 
@@ -216,11 +386,10 @@ function writeFormAnswerLog(status,answerId,answerDate,lstepId,answerName) {
   }
 }
 
-const LOGGER_SHEET = "Logger";
-
 /**
  * Logger シートにログを書き込む
  */
+const LOGGER_SHEET = "Logger";
 function writeLog(level, funcName, step, message, detail = "") {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
