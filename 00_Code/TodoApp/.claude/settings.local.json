@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd \"C:\\\\Users\\\\atsu-\\\\OneDrive\\\\ドキュメント\\\\00_dev\\\\00_Code\\\\TodoApp\\\\code\" && npx @supabase/mcp-server-supabase@latest --help 2>&1 | head -30)",
+      "Bash(cd \"C:\\\\Users\\\\atsu-\\\\OneDrive\\\\ドキュメント\\\\00_dev\\\\00_Code\\\\TodoApp\\\\code\" && npx create-next-app@latest . --typescript --tailwind --eslint --app --no-src-dir --import-alias \"@/*\" --yes 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\atsu-\\\\OneDrive\\\\ドキュメント\\\\00_dev\\\\00_Code\\\\TodoApp\\\\tmp_code\" && npm install @supabase/supabase-js @supabase/ssr zod react-hook-form @hookform/resolvers 2>&1)",
+      "Bash(claude mcp:*)",
+      "Read(//c/Users/atsu-/OneDrive/ドキュメント/00_dev/00_Code/TodoApp/.claude//**)",
+      "Read(//c/Users/atsu-/OneDrive/ドキュメント/00_dev/00_Code/TodoApp/.claude/**)",
+      "mcp__supabase__list_tables",
+      "mcp__supabase__apply_migration"
+    ]
+  }
+}

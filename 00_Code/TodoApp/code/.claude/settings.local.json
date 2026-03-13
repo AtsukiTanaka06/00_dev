@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude mcp:*)",
+      "Bash(cd \"C:\\\\Users\\\\atsu-\\\\OneDrive\\\\ドキュメント\\\\00_dev\\\\00_Code\\\\TodoApp\\\\code\" && npx -y @supabase/mcp-server-supabase@latest --help 2>&1 | head -20)",
+      "Read(//c/Users/atsu-/.claude/**)",
+      "Read(//c/Users/atsu-/AppData/Roaming/Claude/**)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "supabase"
+  ]
+}

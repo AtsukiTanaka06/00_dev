@@ -1,151 +1,252 @@
-# Supabase MCP 接続設定手順
+# Cursor × Supabase MCP 接続手順（Windows・OAuth認証）
 
 ## 概要
 
-MCP（Model Context Protocol）を使うと、Claude Code から自然言語で Supabase プロジェクトを直接操作できる。
-テーブルの作成・マイグレーション・SQLの実行・TypeScript型の生成などが AI との対話で可能になる。
-
-- **ホスト型 MCP サーバー URL**: `https://mcp.supabase.com/mcp`
-- **GitHub**: [supabase-community/supabase-mcp](https://github.com/supabase-community/supabase-mcp)
+MCP（Model Context Protocol）を使うと、Cursor から自然言語で Supabase プロジェクトを直接操作できる。
+本ドキュメントは **Windows 環境 × Cursor × OAuth 認証** の構成を前提に、ゼロから接続できるよう手順をまとめたもの。
 
 ---
 
-## 1. 前提条件
+## Step 1: 前提条件の確認
 
-- [Node.js](https://nodejs.org/) がインストール済みであること（`npx` が使えること）
-- [Claude Code CLI](https://claude.ai/claude-code) がインストール済みであること
-- Supabase アカウントおよびプロジェクトが作成済みであること
+PowerShell または コマンドプロンプトで以下を実行し、インストール済みを確認する。
 
----
-
-## 2. 認証方法の選択
-
-2種類の認証方法がある。通常の開発では **方法A（OAuth）** を推奨。
-
-| 方法 | 適した場面 | 手間 |
-|---|---|---|
-| A. OAuth（ブラウザ認証） | ローカル開発・通常使用 | 少ない（自動） |
-| B. Personal Access Token (PAT) | CI/CD・自動化環境 | やや多い（手動発行） |
-
----
-
-## 3. 方法A：OAuth（推奨）
-
-### 3.1 MCP サーバーを登録する
-
-ターミナルで以下を実行する：
-
-```bash
-claude mcp add supabase -s project -- npx -y @supabase/mcp-server-supabase@latest
+```powershell
+node -v   # v18以上推奨
+npx -v
 ```
 
-- `-s project` はプロジェクトスコープで登録（プロジェクト全体で有効）
-- 特定プロジェクトに限定する場合は [4章](#4-プロジェクトスコープの設定（推奨）) を参照
+インストールされていない場合は [Node.js 公式サイト](https://nodejs.org/) からインストールする（LTS版を選択）。
 
-### 3.2 認証を完了する
+---
 
-Claude Code を起動して Supabase の操作を依頼すると、初回のみブラウザが起動しログイン画面が表示される。
+## Step 2: Cursor の MCP 設定ファイルを作成する
+
+Cursor の MCP 設定ファイルは2種類ある。
+
+| スコープ     | ファイルパス                                 | 適用範囲             |
+| ------------ | -------------------------------------------- | -------------------- |
+| グローバル   | `%USERPROFILE%\.cursor\mcp.json`             | 全プロジェクト共通   |
+| プロジェクト | `.cursor\mcp.json`（プロジェクトルート直下） | そのプロジェクトのみ |
+
+通常は **グローバル設定** を推奨。
+
+### 2-1. グローバル設定ファイルの作成
+
+エクスプローラーで `C:\Users\<ユーザー名>\.cursor\` フォルダを開き、`mcp.json` を作成する。
+フォルダが存在しない場合は作成する。
+
+PowerShell での作成コマンド：
+
+```powershell
+# フォルダ作成（すでにあればスキップ）
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.cursor"
+
+# mcp.json を作成
+New-Item -ItemType File -Path "$env:USERPROFILE\.cursor\mcp.json"
+```
+
+### 2-2. 設定ファイルに内容を記述する
+
+作成した `mcp.json` を以下の内容で保存する。
+
+```json
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@supabase/mcp-server-supabase@latest"]
+    }
+  }
+}
+```
+
+> **Windows では `"command": "cmd"` + `"args": ["/c", "npx", ...]` の形式が必須。**
+> `"command": "npx"` のみでは動作しないことがある。
+
+---
+
+## Step 3: PAT（Personal Access Token）を設定する【推奨】
+
+OAuth 認証の代わりに PAT を使う方法。環境変数に設定しておくと、Cursor 再起動後に自動で認証が通り、毎回ブラウザ認証が不要になる。
+
+### 3-1. Supabase で PAT を発行する
+
+1. ブラウザで [Supabase](https://supabase.com/) にログイン
+2. 右上のユーザーアイコン → **Access Tokens**（または **Personal Access Tokens**）を選択
+3. 新しいトークンを作成してコピーする
+
+### 3-2. Windows のユーザー環境変数に設定する
+
+1. Windows 検索で「環境変数」と入力 → **「システム環境変数の編集」** を選択
+2. **「環境変数(N)...」** ボタンをクリック
+3. 上側の **「ユーザー環境変数」** 欄で **「新規(N)...」** をクリック
+4. 以下を入力して OK で閉じる
+
+| 項目   | 値                          |
+| ------ | --------------------------- |
+| 変数名 | `SUPABASE_ACCESS_TOKEN`     |
+| 変数値 | （コピーした PAT を貼り付け） |
+
+5. すべての環境変数ダイアログを OK で閉じて設定を反映する
+
+---
+
+## Step 4: Cursor を完全終了して再起動する
+
+環境変数を設定したら、Cursor を完全に終了して再起動する。**タスクトレイまで含めて完全に終了することが重要。**
+
+- すべての Cursor ウィンドウを閉じる
+- タスクトレイ（通知領域）のアイコンを右クリック → 「終了」
+- 終了しない場合はタスクマネージャーで `Cursor` プロセスをすべて終了する
+- その後、Cursor を再起動する
+
+---
+
+## Step 5: MCP サーバーの接続を確認する
+
+Cursor 再起動後、以下の手順で MCP サーバーが認識されているか確認する。
+
+1. `Ctrl + Shift + P` でコマンドパレットを開く
+2. `MCP` と入力 → **「MCP: List Servers」** または **「Open MCP Settings」** を選択
+3. `supabase` が一覧に表示されていれば設定は正しく読み込まれている
+
+または Cursor の設定画面から確認：
+
+1. `Ctrl + ,` で設定を開く
+2. 左メニューから **Features** → **MCP** を選択
+3. `supabase` サーバーが表示されていることを確認
+
+---
+
+## Step 6: OAuth 認証を行う（PAT未設定の場合）
+
+### 5-1. 認証トリガーの方法
+
+Cursor のチャット（Composer / Agent モード）で Supabase に関する操作を依頼する。
+
+```
+Supabase のプロジェクト一覧を表示して
+```
+
+### 5-2. ブラウザが自動で開く
+
+初回実行時、MCP サーバーが認証を要求し **自動的にブラウザが起動** する。
+
+ブラウザが開かない場合は、Cursor のターミナルや出力パネルに認証用 URL が表示されるので、それをブラウザに貼り付ける。
+
+### 5-3. Supabase にログインして認証を承認する
 
 1. ブラウザで Supabase アカウントにログイン
-2. 組織へのアクセスを許可
-3. ブラウザを閉じて Claude Code に戻る
+2. 「Allow access to your Supabase organization」の画面で **Allow** をクリック
+3. 「Authentication successful」と表示されたらブラウザを閉じる
 
-以降は自動的に認証が維持される。
+### 5-4. Cursor に戻って動作を確認する
 
----
-
-## 4. 方法B：Personal Access Token (PAT)
-
-### 4.1 PAT を発行する
-
-1. [Supabase ダッシュボード](https://supabase.com/dashboard) にアクセス
-2. 右上のアバター → **Account settings** → **Access Tokens**
-3. **Generate new token** でトークンを発行し、安全な場所に保存する
-
-### 4.2 MCP サーバーを PAT で登録する
-
-```bash
-claude mcp add supabase -s project -e SUPABASE_ACCESS_TOKEN=your_pat_here -- npx -y @supabase/mcp-server-supabase@latest
-```
-
-> `your_pat_here` を実際のトークンに置き換える。
+認証後、Cursor のチャットに Supabase の情報が返ってくれば接続成功。
 
 ---
 
-## 5. プロジェクトスコープの設定（推奨）
+## Step 7: tasks テーブルの作成（このプロジェクト用）
 
-デフォルトでは組織内の全プロジェクトにアクセスできる。
-特定プロジェクトのみに制限することでセキュリティが向上する。
+接続確認後、以下のプロンプトをそのまま Cursor のチャットに貼り付けて実行する。
 
-### 5.1 Project Ref を確認する
-
-1. Supabase ダッシュボードでプロジェクトを開く
-2. **Settings → General** の **Reference ID** をコピー（例: `abcdefghijklmnop`）
-
-### 5.2 スコープを指定して登録する
-
-**OAuth の場合：**
-
-```bash
-claude mcp add supabase -s project -- npx -y @supabase/mcp-server-supabase@latest --project-ref abcdefghijklmnop
 ```
+Supabase に tasks テーブルを作成してください。以下の SQL を実行してください。
 
-**PAT の場合：**
+CREATE TABLE tasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  is_completed boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 
-```bash
-claude mcp add supabase -s project -e SUPABASE_ACCESS_TOKEN=your_pat_here -- npx -y @supabase/mcp-server-supabase@latest --project-ref abcdefghijklmnop
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "users can view own tasks"
+  ON tasks FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "users can insert own tasks"
+  ON tasks FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "users can update own tasks"
+  ON tasks FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "users can delete own tasks"
+  ON tasks FOR DELETE
+  USING (auth.uid() = user_id);
 ```
 
 ---
 
-## 6. 接続確認
+## トラブルシューティング
 
-### 登録済みサーバーの確認
+### ブラウザが開かない・認証 URL が表示されない
 
-```bash
-claude mcp list
+Cursor の出力パネルを確認する。
+
+1. メニューバー → **View** → **Output**
+2. 右上のドロップダウンで **MCP** または **Supabase** を選択
+3. エラーメッセージや URL が表示されていないか確認する
+
+### `npx` が見つからないエラー
+
+Node.js がインストールされているにも関わらずエラーが出る場合、フルパスで指定する。
+
+PowerShell で npx のパスを確認：
+
+```powershell
+where.exe npx
 ```
 
-`supabase` が一覧に表示されていれば登録成功。
+出力例: `C:\Program Files\nodejs\npx.cmd`
 
-### 動作確認
+mcp.json をフルパスに変更：
 
-Claude Code に対して以下のように話しかけて確認する：
-
+```json
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "C:\\Program Files\\nodejs\\npx.cmd",
+        "-y",
+        "@supabase/mcp-server-supabase@latest"
+      ]
+    }
+  }
+}
 ```
-Supabase の tasks テーブルの一覧を見せて
+
+### MCP サーバーが一覧に表示されない
+
+- JSON の構文エラーがないか確認する（末尾カンマ、括弧の閉じ忘れなど）
+- ファイルの保存場所が正しいか確認する（`%USERPROFILE%\.cursor\mcp.json`）
+- Cursor を完全再起動する
+
+JSON の検証は [jsonlint.com](https://jsonlint.com/) などで行える。
+
+### 認証後もツールが動作しない
+
+一度認証トークンをリセットして再認証する。
+
+```powershell
+# Supabase MCP のキャッシュ・認証情報を削除
+Remove-Item -Recurse -Force "$env:APPDATA\supabase-mcp" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\supabase-mcp" -ErrorAction SilentlyContinue
 ```
 
-正常に接続されていれば、テーブル情報が返ってくる。
-
----
-
-## 7. 利用できる主な操作
-
-| カテゴリ | できること |
-|---|---|
-| データベース | テーブル一覧・SQL実行・マイグレーション管理・拡張機能 |
-| 開発支援 | プロジェクト URL / APIキー取得・TypeScript型生成 |
-| デバッグ | サービスログ取得・セキュリティアドバイザー |
-| Edge Functions | 関数のデプロイ・管理 |
-| ドキュメント | Supabase 公式ドキュメントの検索 |
-| ブランチ管理 | DBブランチの作成・切り替え（有料プランのみ） |
-
----
-
-## 8. セキュリティ上の注意
-
-- **本番環境には接続しない** — 開発用プロジェクトのみに MCP を使う
-- **プロジェクトスコープを必ず設定する** — 不要なプロジェクトへのアクセスを防ぐ
-- **読み取り専用モード** — 本番データを参照するだけの場合は `--read-only` オプションを追加：
-  ```bash
-  npx -y @supabase/mcp-server-supabase@latest --project-ref <ref> --read-only
-  ```
-- **PAT はリポジトリにコミットしない** — `.env.local` や環境変数で管理する
+削除後、Cursor を再起動して再度 OAuth 認証を行う。
 
 ---
 
 ## 参考リンク
 
 - [Supabase MCP 公式ドキュメント](https://supabase.com/docs/guides/getting-started/mcp)
-- [supabase-mcp GitHub リポジトリ](https://github.com/supabase-community/supabase-mcp)
+- [Cursor MCP ドキュメント](https://docs.cursor.com/context/model-context-protocol)
+- [supabase-mcp GitHub](https://github.com/supabase-community/supabase-mcp)
