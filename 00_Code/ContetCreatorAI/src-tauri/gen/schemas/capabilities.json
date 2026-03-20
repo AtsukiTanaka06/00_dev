@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capabilities for ContentCreatorAI","local":true,"windows":["main"],"permissions":["core:default","store:default","http:default","http:allow-fetch-send",{"identifier":"http:allow-fetch","allow":[{"url":"https://api.notion.com/**"}]}]}}
